@@ -23,7 +23,6 @@ const store = new Map(); // almacén temporal en memoria: id -> Buffer
 const descriptionLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hour
   max: 10,
-  keyGenerator: (req) => req.ip,
   skip: (req) => !(req.body && req.body.productName && req.body.productName.trim()),
   handler: (req, res) => {
     res.status(429).json({ error: 'Límite alcanzado: máximo 10 descripciones por hora. Inténtalo más tarde.' });
@@ -441,52 +440,6 @@ app.get('/', (req, res) => {
 
     .back-btn:hover { color: var(--ink); }
 
-    /* ── Dimension inputs ── */
-    .dim-row {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-
-    .dim-input {
-      width: 90px;
-      padding: 11px 14px;
-      background: rgba(255,255,255,.05);
-      border: 1.5px solid rgba(148,163,184,.35);
-      border-radius: 10px;
-      font-size: .9rem;
-      color: var(--ink);
-      outline: none;
-      font-family: inherit;
-      box-shadow: inset 0 1px 3px rgba(0,0,0,.3);
-      transition: border-color .15s, box-shadow .15s;
-      -moz-appearance: textfield;
-    }
-
-    .dim-input::-webkit-outer-spin-button,
-    .dim-input::-webkit-inner-spin-button {
-      -webkit-appearance: none;
-      margin: 0;
-    }
-
-    .dim-input:focus {
-      border-color: var(--pixel-border);
-      box-shadow: 0 0 0 3px var(--pixel-dim);
-    }
-
-    .dim-sep {
-      color: var(--ghost);
-      font-size: 1.1rem;
-      font-weight: 600;
-      user-select: none;
-    }
-
-    .dim-hint {
-      margin-top: 8px;
-      font-size: .75rem;
-      color: var(--muted);
-    }
-
     /* ── Alert overlay ── */
     .alert-overlay {
       position: fixed;
@@ -639,18 +592,6 @@ app.get('/', (req, res) => {
             <button type="button" class="fz-clear" id="fzClear" title="Quitar imagen">✕</button>
           </div>
           <input type="file" id="image" name="image" accept="image/*" />
-        </div>
-
-        <div class="field">
-          <div class="field-label">Área de imagen</div>
-          <div class="dim-row">
-            <input type="number" class="dim-input" id="resizeWidth"
-                   name="resizeWidth" value="800" min="100" max="1000" />
-            <span class="dim-sep">×</span>
-            <input type="number" class="dim-input" id="resizeHeight"
-                   name="resizeHeight" value="800" min="100" max="1000" />
-          </div>
-          <p class="dim-hint">Lienzo final: 1000 × 1000 px</p>
         </div>
 
         <button type="submit" id="submitBtn">Procesar →</button>
@@ -887,8 +828,6 @@ app.get('/', (req, res) => {
       formError.style.display = 'none';
       submitBtn.disabled = false;
       submitBtn.textContent = 'Procesar →';
-      document.getElementById('resizeWidth').value  = 800;
-      document.getElementById('resizeHeight').value = 800;
     });
 
     // Character counter
@@ -905,18 +844,59 @@ app.get('/', (req, res) => {
 </html>`);
 });
 
+// ─── Strip white background via BFS flood-fill ────────────────────────────────
+async function stripWhiteBackground(inputBuffer, tolerance = 20) {
+  // Get raw RGBA pixels
+  const { data, info } = await sharp(inputBuffer)
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+
+  const { width, height } = info;
+  const pixels = new Uint8Array(data);
+  const visited = new Uint8Array(width * height); // 0 = not visited
+
+  const idx = (x, y) => (y * width + x) * 4;
+  const isNearWhite = (x, y) => {
+    const i = idx(x, y);
+    return pixels[i] > (255 - tolerance) &&
+           pixels[i+1] > (255 - tolerance) &&
+           pixels[i+2] > (255 - tolerance);
+  };
+
+  // BFS flood-fill from all 4 edges
+  const queue = [];
+  const enqueue = (x, y) => {
+    const pos = y * width + x;
+    if (x < 0 || x >= width || y < 0 || y >= height) return;
+    if (visited[pos]) return;
+    if (!isNearWhite(x, y)) return;
+    visited[pos] = 1;
+    queue.push(x, y);
+  };
+
+  for (let x = 0; x < width; x++) { enqueue(x, 0); enqueue(x, height - 1); }
+  for (let y = 0; y < height; y++) { enqueue(0, y); enqueue(width - 1, y); }
+
+  let qi = 0;
+  while (qi < queue.length) {
+    const x = queue[qi++];
+    const y = queue[qi++];
+    pixels[idx(x, y) + 3] = 0; // set alpha to transparent
+    enqueue(x - 1, y); enqueue(x + 1, y);
+    enqueue(x, y - 1); enqueue(x, y + 1);
+  }
+
+  // Rebuild PNG from modified pixel buffer
+  return sharp(Buffer.from(pixels), {
+    raw: { width, height, channels: 4 },
+  }).png().toBuffer();
+}
+
 // ─── Procesar carga (JSON) ────────────────────────────────────────────────────
 app.post('/resize', upload.single('image'), descriptionLimiter, async (req, res) => {
   try {
     const { productName } = req.body;
-    const resizeWidth  = Math.min(1000, Math.max(100, parseInt(req.body.resizeWidth)  || 800));
-    const resizeHeight = Math.min(1000, Math.max(100, parseInt(req.body.resizeHeight) || 800));
-    const padH = 1000 - resizeWidth;
-    const padV = 1000 - resizeHeight;
-    const padLeft   = Math.floor(padH / 2);
-    const padRight  = padH - padLeft;
-    const padTop    = Math.floor(padV / 2);
-    const padBottom = padV - padTop;
     const hasImage = !!req.file;
     const hasName = !!(productName && productName.trim());
 
@@ -932,12 +912,14 @@ app.post('/resize', upload.single('image'), descriptionLimiter, async (req, res)
     let resizedBuffer = null;
     let imageId = null;
     if (hasImage) {
-      resizedBuffer = await sharp(req.file.buffer)
-        .resize(resizeWidth, resizeHeight, { fit: 'contain', background: { r: 255, g: 255, b: 255, alpha: 1 }, withoutEnlargement: true })
-        .extend({
-          top: padTop, bottom: padBottom, left: padLeft, right: padRight,
-          background: { r: 255, g: 255, b: 255, alpha: 1 },
-        })
+      // Step 1: Strip white background from original image
+      const noBgBuffer = await stripWhiteBackground(req.file.buffer);
+
+      // Step 2: Resize + pad
+      resizedBuffer = await sharp(noBgBuffer)
+        .resize(800, 800, { fit: 'contain', background: { r: 255, g: 255, b: 255, alpha: 1 }, withoutEnlargement: false })
+        .extend({ top: 100, bottom: 100, left: 100, right: 100, background: { r: 255, g: 255, b: 255, alpha: 1 } })
+        .flatten({ background: { r: 255, g: 255, b: 255 } })
         .toFormat('jpeg', { quality: 90 })
         .toBuffer();
 
