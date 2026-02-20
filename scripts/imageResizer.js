@@ -202,6 +202,30 @@ app.get('/', (req, res) => {
       box-shadow: 0 0 0 3px var(--pixel-dim);
     }
 
+    select {
+      width: 100%;
+      padding: 11px 14px;
+      background: rgba(255,255,255,.05);
+      border: 1.5px solid rgba(148,163,184,.35);
+      border-radius: 10px;
+      font-size: .9rem;
+      color: var(--ink);
+      outline: none;
+      font-family: inherit;
+      box-shadow: inset 0 1px 3px rgba(0,0,0,.3);
+      cursor: pointer;
+      appearance: none;
+      -webkit-appearance: none;
+    }
+    select:focus {
+      border-color: var(--pixel-border);
+      box-shadow: 0 0 0 3px var(--pixel-dim);
+    }
+    select option {
+      background: #0d1130;
+      color: #f1f5f9;
+    }
+
     /* Hidden native file input */
     input[type="file"] { display: none; }
 
@@ -594,6 +618,16 @@ app.get('/', (req, res) => {
           <input type="file" id="image" name="image" accept="image/*" />
         </div>
 
+        <div class="field">
+          <div class="field-label">Tamaño del producto en el canvas</div>
+          <select name="productSize" id="productSize">
+            <option value="800">Grande — 800 px (por defecto)</option>
+            <option value="700">Mediano — 700 px</option>
+            <option value="600">Pequeño — 600 px</option>
+            <option value="500">Muy pequeño — 500 px</option>
+          </select>
+        </div>
+
         <button type="submit" id="submitBtn">Procesar →</button>
         <p class="error-msg" id="formError"></p>
       </form>
@@ -912,13 +946,20 @@ app.post('/resize', upload.single('image'), descriptionLimiter, async (req, res)
     let resizedBuffer = null;
     let imageId = null;
     if (hasImage) {
+      // Read product size (default 800, clamped to valid presets)
+      const allowedSizes = [500, 600, 700, 800];
+      const productSize = allowedSizes.includes(parseInt(req.body.productSize))
+        ? parseInt(req.body.productSize)
+        : 800;
+      const pad = (1000 - productSize) / 2;
+
       // Step 1: Strip white background from original image
       const noBgBuffer = await stripWhiteBackground(req.file.buffer);
 
       // Step 2: Resize + pad
       resizedBuffer = await sharp(noBgBuffer)
-        .resize(800, 800, { fit: 'contain', background: { r: 255, g: 255, b: 255, alpha: 1 }, withoutEnlargement: false })
-        .extend({ top: 100, bottom: 100, left: 100, right: 100, background: { r: 255, g: 255, b: 255, alpha: 1 } })
+        .resize(productSize, productSize, { fit: 'contain', background: { r: 255, g: 255, b: 255, alpha: 1 }, withoutEnlargement: false })
+        .extend({ top: pad, bottom: pad, left: pad, right: pad, background: { r: 255, g: 255, b: 255, alpha: 1 } })
         .flatten({ background: { r: 255, g: 255, b: 255 } })
         .toFormat('jpeg', { quality: 90 })
         .toBuffer();
