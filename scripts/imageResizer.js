@@ -645,12 +645,12 @@ app.get('/', (req, res) => {
           <div class="field-label">Área de imagen</div>
           <div class="dim-row">
             <input type="number" class="dim-input" id="resizeWidth"
-                   name="resizeWidth" value="800" min="100" max="5000" />
+                   name="resizeWidth" value="800" min="100" max="1000" />
             <span class="dim-sep">×</span>
             <input type="number" class="dim-input" id="resizeHeight"
-                   name="resizeHeight" value="800" min="100" max="5000" />
+                   name="resizeHeight" value="800" min="100" max="1000" />
           </div>
-          <p class="dim-hint">Lienzo final: <span id="canvasHint">1000 × 1000 px</span></p>
+          <p class="dim-hint">Lienzo final: 1000 × 1000 px</p>
         </div>
 
         <button type="submit" id="submitBtn">Procesar →</button>
@@ -889,7 +889,6 @@ app.get('/', (req, res) => {
       submitBtn.textContent = 'Procesar →';
       document.getElementById('resizeWidth').value  = 800;
       document.getElementById('resizeHeight').value = 800;
-      document.getElementById('canvasHint').textContent = '1000 × 1000 px';
     });
 
     // Character counter
@@ -901,50 +900,6 @@ app.get('/', (req, res) => {
       nameCounter.style.color = len >= 90 ? '#f87171' : 'var(--muted)';
     });
 
-    const wInput = document.getElementById('resizeWidth');
-    const hInput = document.getElementById('resizeHeight');
-
-    function updateCanvasHint() {
-      const w = Math.max(100, parseInt(wInput.value) || 800);
-      const h = Math.max(100, parseInt(hInput.value) || 800);
-      document.getElementById('canvasHint').textContent =
-        (w + 200) + ' × ' + (h + 200) + ' px';
-    }
-
-    function maybeShowAlert() {
-      const w = parseInt(wInput.value) || 800;
-      const h = parseInt(hInput.value) || 800;
-      updateCanvasHint();
-      if (w !== 800 || h !== 800) {
-        document.getElementById('alertCanvas').textContent =
-          (w + 200) + ' × ' + (h + 200) + ' px';
-        document.getElementById('alertOverlay').classList.add('visible');
-      }
-    }
-
-    wInput.addEventListener('change', maybeShowAlert);
-    hInput.addEventListener('change', maybeShowAlert);
-    wInput.addEventListener('input',  updateCanvasHint);
-    hInput.addEventListener('input',  updateCanvasHint);
-
-    document.getElementById('alertConfirm').addEventListener('click', () => {
-      document.getElementById('alertOverlay').classList.remove('visible');
-    });
-  </script>
-
-  <div class="alert-overlay" id="alertOverlay">
-    <div class="alert-box">
-      <div class="alert-icon">⚠️</div>
-      <div class="alert-title">Dimensiones personalizadas</div>
-      <div class="alert-desc">
-        Estás usando un área distinta al estándar
-        <strong>800 × 800 px</strong>.<br>
-        El lienzo de salida será
-        <strong><span id="alertCanvas">—</span></strong>.
-      </div>
-      <button class="alert-confirm" id="alertConfirm">Entendido</button>
-    </div>
-  </div>
 </body>
 </html>`);
 });
@@ -953,8 +908,14 @@ app.get('/', (req, res) => {
 app.post('/resize', upload.single('image'), descriptionLimiter, async (req, res) => {
   try {
     const { productName } = req.body;
-    const resizeWidth  = Math.min(5000, Math.max(100, parseInt(req.body.resizeWidth)  || 800));
-    const resizeHeight = Math.min(5000, Math.max(100, parseInt(req.body.resizeHeight) || 800));
+    const resizeWidth  = Math.min(1000, Math.max(100, parseInt(req.body.resizeWidth)  || 800));
+    const resizeHeight = Math.min(1000, Math.max(100, parseInt(req.body.resizeHeight) || 800));
+    const padH = 1000 - resizeWidth;
+    const padV = 1000 - resizeHeight;
+    const padLeft   = Math.floor(padH / 2);
+    const padRight  = padH - padLeft;
+    const padTop    = Math.floor(padV / 2);
+    const padBottom = padV - padTop;
     const hasImage = !!req.file;
     const hasName = !!(productName && productName.trim());
 
@@ -973,7 +934,7 @@ app.post('/resize', upload.single('image'), descriptionLimiter, async (req, res)
       resizedBuffer = await sharp(req.file.buffer)
         .resize(resizeWidth, resizeHeight, { fit: 'contain', background: { r: 255, g: 255, b: 255, alpha: 1 }, withoutEnlargement: true })
         .extend({
-          top: 100, bottom: 100, left: 100, right: 100,
+          top: padTop, bottom: padBottom, left: padLeft, right: padRight,
           background: { r: 255, g: 255, b: 255, alpha: 1 },
         })
         .toFormat('jpeg', { quality: 90 })
