@@ -12,12 +12,23 @@ const multer = require('multer');
 const sharp = require('sharp');
 const { v4: uuidv4 } = require('uuid');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+const rateLimit = require('express-rate-limit');
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
 const store = new Map(); // almacén temporal en memoria: id -> Buffer
+
+const descriptionLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 10,
+  keyGenerator: (req) => req.ip,
+  skip: (req) => !(req.body && req.body.productName && req.body.productName.trim()),
+  handler: (req, res) => {
+    res.status(429).json({ error: 'Límite alcanzado: máximo 10 descripciones por hora. Inténtalo más tarde.' });
+  },
+});
 
 // ─── SPA ──────────────────────────────────────────────────────────────────────
 app.get('/', (req, res) => {
@@ -607,7 +618,9 @@ app.get('/', (req, res) => {
             <span class="optional">(opcional)</span>
           </div>
           <input type="text" id="productName" name="productName"
-                 placeholder="ej. Auriculares Inalámbricos con Cancelación de Ruido" />
+                 placeholder="ej. Auriculares Inalámbricos con Cancelación de Ruido"
+                 maxlength="100" />
+          <span id="nameCounter" style="font-size:.72rem;color:var(--muted);float:right;margin-top:4px;">0 / 100</span>
         </div>
 
         <div class="field">
@@ -879,6 +892,15 @@ app.get('/', (req, res) => {
       document.getElementById('canvasHint').textContent = '1000 × 1000 px';
     });
 
+    // Character counter
+    const nameInput   = document.getElementById('productName');
+    const nameCounter = document.getElementById('nameCounter');
+    nameInput.addEventListener('input', () => {
+      const len = nameInput.value.length;
+      nameCounter.textContent = len + ' / 100';
+      nameCounter.style.color = len >= 90 ? '#f87171' : 'var(--muted)';
+    });
+
     const wInput = document.getElementById('resizeWidth');
     const hInput = document.getElementById('resizeHeight');
 
@@ -928,7 +950,7 @@ app.get('/', (req, res) => {
 });
 
 // ─── Procesar carga (JSON) ────────────────────────────────────────────────────
-app.post('/resize', upload.single('image'), async (req, res) => {
+app.post('/resize', upload.single('image'), descriptionLimiter, async (req, res) => {
   try {
     const { productName } = req.body;
     const resizeWidth  = Math.min(5000, Math.max(100, parseInt(req.body.resizeWidth)  || 800));
@@ -938,6 +960,10 @@ app.post('/resize', upload.single('image'), async (req, res) => {
 
     if (!hasImage && !hasName) {
       return res.status(400).json({ error: 'Debes ingresar al menos un campo: nombre de producto o imagen.' });
+    }
+
+    if (hasName && productName.trim().length > 100) {
+      return res.status(400).json({ error: 'El nombre del producto no puede superar los 100 caracteres.' });
     }
 
     // 1. Redimensionar imagen (si se proporcionó)
