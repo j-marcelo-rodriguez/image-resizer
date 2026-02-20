@@ -625,6 +625,7 @@ app.get('/', (req, res) => {
             <option value="700">Mediano — 700 px</option>
             <option value="600">Pequeño — 600 px</option>
             <option value="500">Muy pequeño — 500 px</option>
+            <option value="400">Miniatura — 400 px</option>
           </select>
         </div>
 
@@ -947,7 +948,7 @@ app.post('/resize', upload.single('image'), descriptionLimiter, async (req, res)
     let imageId = null;
     if (hasImage) {
       // Read product size (default 800, clamped to valid presets)
-      const allowedSizes = [500, 600, 700, 800];
+      const allowedSizes = [400, 500, 600, 700, 800];
       const productSize = allowedSizes.includes(parseInt(req.body.productSize))
         ? parseInt(req.body.productSize)
         : 800;
