@@ -900,6 +900,7 @@ app.get('/', (req, res) => {
       nameCounter.style.color = len >= 90 ? '#f87171' : 'var(--muted)';
     });
 
+  </script>
 </body>
 </html>`);
 });
